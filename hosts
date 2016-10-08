@@ -1,0 +1,14 @@
+[cluster]
+NodeA
+NodeB
+NodeC
+
+[admin]
+NodeA
+
+[osd]
+NodeA
+NodeB
+NodeC
+
+

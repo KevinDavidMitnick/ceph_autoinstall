@@ -1,0 +1,2 @@
+KERNEL=="sd[b-z]1", OWNER="ceph", GROUP="ceph", MODE="660"
+SUBSYSTEM=="block", ATTR{device/model}=="Crucial_CT1024MX", ACTION=="add|change", KERNEL=="sd[a-z]", ATTR{bdi/read_ahead_kb}="16384", ATTR{queue/scheduler}="noop",ATTR{queue/read_ahead_kb}="16384",ATTR{queue/nr_requests}="512"

@@ -1,0 +1,20 @@
+---
+# This playbook deploys the whole application stack in this site.
+
+- name: apply common configuration to all nodes
+  hosts: osd
+  remote_user: root
+  roles:
+    - common
+
+- name: install ceph admin,ceph mon and ntp adimn on admin nodes
+  hosts: admin
+  remote_user: root
+  roles:
+    - admin
+
+- name: prepare and acive osd
+  hosts: osd
+  remote_user: root
+  roles:
+    - osd

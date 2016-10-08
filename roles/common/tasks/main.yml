@@ -1,0 +1,43 @@
+---
+# This playbook contains common plays that will be run on all nodes.
+
+
+- name:  set enforce 0
+  shell: set enforce 0 
+
+- name:  set selinux disable
+  template: src=selinux.conf dest=/etc/selinux/config
+
+- name: stop firewalld
+  service: name=firewalld state=stopped enabled=no
+
+- name: clear iptables
+  service: name=iptables state=stopped enabled=no
+
+- name:  set file-max
+  template: src=sysctl.conf dest=/etc/sysctl.conf
+
+- name:  set ulimit
+  template: src=limits.conf  dest=/etc/security/limits.conf
+
+- name:  set disk model
+  template: src=99-trunkey.rules  dest=/usr/lib/udev/rules.d/99-trunkey.rules
+
+- name:  set centos repo
+  template: src=Centos-7.repo  dest=/etc/yum.repos.d/Centos-7.repo
+
+- name:  set epel repo
+  template: src=epel-7.repo  dest=/etc/yum.repos.d/epel-7.repo
+
+- name:  set ceph repo
+  template: src=ceph.repo  dest=/etc/yum.repos.d/ceph.repo
+
+- name: upgrade all packages
+  yum: name=* state=latest
+
+- name: Install ntp
+  yum: name=ntp state=latest
+
+- name: Install ceph
+  yum:  name=ceph state=latest
+

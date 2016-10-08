@@ -1,0 +1,14 @@
+driftfile /var/lib/ntp/drift
+
+restrict 127.0.0.1
+restrict ::1
+restrict {{cluster_network}}
+
+server 133.100.11.8
+server 127.127.1.0
+fudge 127.127.1.0 stratum 10
+
+includefile /etc/ntp/crypto/pw
+keys /etc/ntp/keys
+disable monitor
+
