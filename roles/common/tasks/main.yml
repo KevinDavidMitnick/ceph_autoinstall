@@ -32,12 +32,8 @@
 - name:  set ceph repo
   template: src=ceph.repo  dest=/etc/yum.repos.d/ceph.repo
 
-- name: upgrade all packages
-  yum: name=* state=latest
-
 - name: Install ntp
   yum: name=ntp state=latest
 
 - name: Install ceph
   yum:  name=ceph state=latest
-

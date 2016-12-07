@@ -1,7 +1,8 @@
 ---
 # This playbook deploys the whole application stack in this site.
-- name: prepare and acive osd
+
+- name: apply common configuration to all nodes
   hosts: osd
   remote_user: root
   roles:
-    - osd
+    - common

@@ -1,36 +1,8 @@
 ---
 # This playbook contains common plays that will be run on all nodes.
 
-- name: parted disk
-  shell: parted -s /dev/{{item}} mklabel gpt
-  with_ini: disk* section={{ansible_nodename}} file=disk.ini re=true
-
-- name:  mkpart journal
-  shell: parted -s /dev/{{item}} mkpart journal 1 20G
-  with_ini: disk* section={{ansible_nodename}} file=disk.ini re=true
-
-- name:  mkpart data
-  shell: parted -s /dev/{{item}} mkpart data 20G -- -1
-  with_ini: disk* section={{ansible_nodename}} file=disk.ini re=true
-
-- name: mkfs.xfs journal
-  shell: mkfs.xfs -f /dev/{{item}}1
-  with_ini: disk* section={{ansible_nodename}} file=disk.ini re=true
-
-- name: mkfs.xfs data
-  shell: mkfs.xfs -f /dev/{{item}}2
-  with_ini: disk* section={{ansible_nodename}} file=disk.ini re=true
-
-- name: chown journal as ceph:ceph 
-  shell: chown ceph:ceph  /dev/{{item}}1
-  with_ini: disk* section={{ansible_nodename}} file=disk.ini re=true
-
-- name: prepare disk
-  command: ceph-disk prepare /dev/{{item}}2 /dev/{{item}}1
-  with_ini: disk* section={{ansible_nodename}} file=disk.ini re=true
-
-- name: activate disk
-  command: ceph-disk activate /dev/{{item}}2
+- name: add osd
+  script: ./roles/osd/scripts/add_osd.sh  {{ansible_nodename}} {{item}} 20 
   with_ini: disk* section={{ansible_nodename}} file=disk.ini re=true
 
 - name: Configure ntp file
@@ -39,4 +11,3 @@
 
 - name: Start the ntp service
   service: name=ntpd state=started enabled=yes
-

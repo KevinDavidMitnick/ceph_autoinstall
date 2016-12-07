@@ -3,6 +3,11 @@ NodeA
 NodeB
 NodeC
 
+[mon]
+NodeA
+NodeB
+NodeC
+
 [admin]
 NodeA
 
