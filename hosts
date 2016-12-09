@@ -1,19 +1,21 @@
 [cluster]
-NodeA
-NodeB
-NodeC
+Node1
+Node2
+Node3
+Node4
 
 [mon]
-NodeA
-NodeB
-NodeC
+Node2
+Node3
+Node4
 
 [admin]
-NodeA
+Node1
 
 [osd]
-NodeA
-NodeB
-NodeC
+Node1
+Node2
+Node3
+Node4
 
 
