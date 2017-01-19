@@ -1,8 +1,8 @@
 [ceph]
 name=ceph
-baseurl=http://mirrors.aliyun.com/ceph/rpm-jewel/el7/x86_64/
+baseurl=http://mirrors.aliyun.com/ceph/rpm-kraken/el7/x86_64/
 gpgcheck=0
 [ceph-noarch]
 name=cephnoarch
-baseurl=http://mirrors.aliyun.com/ceph/rpm-jewel/el7/noarch/
+baseurl=http://mirrors.aliyun.com/ceph/rpm-kraken/el7/noarch/
 gpgcheck=0

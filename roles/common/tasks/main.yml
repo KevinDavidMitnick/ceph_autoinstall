@@ -17,6 +17,9 @@
 - name:  set file-max
   template: src=sysctl.conf dest=/etc/sysctl.conf
 
+- name: set yum cache
+  template: src=yum.conf dest=/etc/yum.conf
+
 - name:  set ulimit
   template: src=limits.conf  dest=/etc/security/limits.conf
 
@@ -37,3 +40,14 @@
 
 - name: Install ceph
   yum:  name=ceph state=latest
+
+- name: Configure ntp file
+  template: src=ntp.conf.j2 dest=/etc/ntp/ntp.conf
+  notify: restart ntp
+
+- name: Start the ntp service
+  service: name=ntpd state=started enabled=yes
+
+- name: format disk
+  script: ./roles/osd/scripts/fortmat.sh  {{ansible_nodename}} {{item}} 20
+  with_ini: disk* section={{ansible_nodename}} file=disk.ini re=true
