@@ -37,6 +37,17 @@ osd_pool_default_size=$(readConf ceph osd_pool_default_size)
 osd_pool_default_min_size=$(readConf ceph osd_pool_default_min_size)
 #---------------------config ceph.conf,you can add conifg in function mon_install------------------------------------------
 
+function ssh_init(){
+	ssh-keygen
+	for((i=0;i<${#physical_list[*]};i++))
+	do
+		node=${physical_list[i]} 
+		ssh-copy-id ${node}
+	done
+
+}
+
+
 function ntp_init(){
 	#1.write remote ntpd.conf
 	cluster_net=`echo -n ${cluster_network}|sed 's/0/*/g'`
@@ -89,6 +100,9 @@ function ntp_init(){
 
 
 function ceph_preinstall(){
+	#echo 0).ssh init for all nodes
+	ssh_init
+
 	#foreach every physical_list to install ceph
 	for((i=0;i<${#physical_list[*]};i++))
 	do
@@ -434,6 +448,9 @@ function ceph_add_host(){
 
 	read -p  "are you sure you want to add all disk of  ${node}? [Y/N]:"  res
 	[ ${res} != "Y" ] && echo "quit to add host." && exit -1
+
+	echo "0).copy ssh key id"
+	ssh-copy-id ${node}
 
 	echo "1).set enforce 0,shutdown firewalld and iptables"
 	ssh  $node 'set enforce 0'
