@@ -1,8 +1,0 @@
----
-# This playbook deploys the whole application stack in this site.
-
-- name: install mon 
-  hosts: mon
-  remote_user: root
-  roles:
-    - mon

@@ -1,9 +1,0 @@
----
-# Variables listed here are applicable to all host groups
-
-ntpserver: NodeA
-cluster_network: 172.16.0.0/18
-cluster_node: NodeA NodeB NodeC NodeD
-mon_node: NodeA NodeB NodeC
-erasure_k: 3
-erasure_m: 1
