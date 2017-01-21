@@ -37,13 +37,62 @@ osd_pool_default_size=$(readConf ceph osd_pool_default_size)
 osd_pool_default_min_size=$(readConf ceph osd_pool_default_min_size)
 #---------------------config ceph.conf,you can add conifg in function mon_install------------------------------------------
 
+function ntp_init(){
+	#1.write remote ntpd.conf
+	cluster_net=`echo -n ${cluster_network}|sed 's/0/*/g'`
+	admin_ip=`ip addr |egrep ${cluster_net}|awk '{print $2}'|awk -F/ '{printf $1}'`
+	for((i=0;i<${#physical_list[*]};i++))
+	do
+		node=${physical_list[i]} 
+		remote_ip=`ssh ${node} ip addr |egrep ${cluster_net}|awk '{print $2}'|awk -F/ '{printf $1}'`
+		ssh ${node} "yum install -y ntp"
+		ssh ${node} "echo driftfile /var/lib/ntp/drift > /etc/ntp.conf"
+		ssh ${node} "echo restrict default nomodify notrap nopeer noquery >> /etc/ntp.conf"
+		ssh ${node} "echo restrict 127.0.0.1 >> /etc/ntp.conf"
+		ssh ${node} "echo restrict ::1 >> /etc/ntp.conf"
+		ssh ${node} "echo server ${admin_ip} >> /etc/ntp.conf"
+		ssh ${node} "echo includefile /etc/ntp/crypto/pw >> /etc/ntp.conf"
+		ssh ${node} "echo keys /etc/ntp/keys >> /etc/ntp.conf"
+		ssh ${node} "echo disable monitor >> /etc/ntp.conf"
+		ssh ${node} "systemctl restart ntpd"
+		ssh ${node} "systemctl enable ntpd"
+	done
+	#2.write admin ntpd.conf
+	net=`echo ${cluster_network}|awk -F/ '{print $1}'`
+	num=`echo ${cluster_network}|awk -F/ '{print $2}'`
+	let num=num/8
+	str=""
+	for((i=0;i<num;i++)){
+		str="255.${str}"	
+	}
+	let num=4-num
+	str=${str%.}
+	for((i=0;i<num;i++)){
+		str="${str}.0"	
+	}
+	
+	echo "driftfile /var/lib/ntp/drift" > /etc/ntp.conf
+	echo "restrict 127.0.0.1" > /etc/ntp.conf
+	echo "restrict ${net} mask 255.255.0.0" >> /etc/ntp.conf
+	echo "server 127.127.1.0 minpoll 4" >> /etc/ntp.conf
+	echo "fudge 127.127.1.0 stratum 10" >> /etc/ntp.conf
+	echo "includefile /etc/ntp/crypto/pw" >> /etc/ntp.conf
+	echo "keys /etc/ntp/keys" >> /etc/ntp.conf
+	echo "disable monitor" >> /etc/ntp.conf
+	echo "server 0.pool.ntp.org iburst" >> /etc/ntp.conf
+	echo "server 0.pool.ntp.org iburst" >> /etc/ntp.conf
+
+
+	systemctl restart ntpd
+	systemctl enable ntpd
+}
+
+
 function ceph_preinstall(){
 	#foreach every physical_list to install ceph
 	for((i=0;i<${#physical_list[*]};i++))
 	do
 		node=${physical_list[i]} 
-		#ip=$(readConf ${physical_list[i]} public_address)
-
 		echo "1).set enforce 0,shutdown firewalld and iptables"
 		ssh  $node 'set enforce 0'
 		ssh  $node "sed -i 's/SELINUX=enforcing/SELINUX=disabled'/g /etc/selinux/config"
@@ -91,6 +140,9 @@ function ceph_preinstall(){
 	echo "7).yum install -y ceph-deploy"
 	yum install -y ceph-deploy
 	mkdir -p /home/ceph/my-cluster/ && cp ceph.ini /home/ceph/my-cluster/ && cd /home/ceph/my-cluster/
+
+	echo "8).ntp init"
+	ntp_init
 }
 
 function ceph_moninstall(){
@@ -422,6 +474,9 @@ function ceph_add_host(){
 	ssh  $node 'yum upgrade -y'
 
 
+	echo "5).ntp init"
+	ntp_init
+
 	echo "5).set yum cache 1"
 	ssh $node "sed -i 's/keepcache=0/keepcache=1/g' /etc/yum.conf" 
 
@@ -481,6 +536,7 @@ function ceph_remove_host(){
 		ssh ${node} "umount /var/lib/ceph/osd/ceph-${id}"
 		ssh ${node} "rm -rf /var/lib/ceph/osd/ceph-${id}"
 		ssh ${node} "rm -rf /etc/systemd/system/ceph-osd.target.wants/ceph-osd@${id}.service"
+		ssh ${node} "yum remove -y ntp"
 	done
 	ceph osd crush remove ${node}
 	echo "11).remove ceph dir"
