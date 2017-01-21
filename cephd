@@ -93,7 +93,6 @@ function ntp_init(){
 	echo "keys /etc/ntp/keys" >> /etc/ntp.conf
 	echo "disable monitor" >> /etc/ntp.conf
 	echo "server 0.pool.ntp.org iburst" >> /etc/ntp.conf
-	echo "server 0.pool.ntp.org iburst" >> /etc/ntp.conf
 	systemctl stop ntpd
 	ntpdate 202.118.1.48
 	systemctl start ntpd
