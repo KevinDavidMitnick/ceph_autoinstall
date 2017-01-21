@@ -65,7 +65,9 @@ function ntp_init(){
 		ssh ${node} "echo includefile /etc/ntp/crypto/pw >> /etc/ntp.conf"
 		ssh ${node} "echo keys /etc/ntp/keys >> /etc/ntp.conf"
 		ssh ${node} "echo disable monitor >> /etc/ntp.conf"
-		ssh ${node} "systemctl restart ntpd"
+		ssh ${node} "systemctl stop ntpd"
+		ssh ${node} "ntpdate 202.118.1.48"
+		ssh ${node} "systemctl start ntpd"
 		ssh ${node} "systemctl enable ntpd"
 	done
 	#2.write admin ntpd.conf
@@ -92,9 +94,9 @@ function ntp_init(){
 	echo "disable monitor" >> /etc/ntp.conf
 	echo "server 0.pool.ntp.org iburst" >> /etc/ntp.conf
 	echo "server 0.pool.ntp.org iburst" >> /etc/ntp.conf
-
-
-	systemctl restart ntpd
+	systemctl stop ntpd
+	ntpdate 202.118.1.48
+	systemctl start ntpd
 	systemctl enable ntpd
 }
 
