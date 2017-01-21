@@ -1,0 +1,562 @@
+#!/bin/sh
+
+# the following is chkconfig init header
+#
+# zstack-server:  zstack server daemon
+#
+# chkconfig: 345 97 03
+# description:  This is a daemon instructed by zstack management server \
+#               to perform zstack related operations\
+#               zstack server was launched by apache-tomcat
+#               See http://zstack.org
+#
+# processname: /usr/bin/java org.apache.catalina.startup.Bootstrap start
+# pidfile: /var/run/zstack/zstackserver.pid
+#
+
+#ceph.ini read function 
+function readConf() {
+        ini_file="ceph.ini"
+        section=$1
+        item=$2
+        _readIni=`awk '/\['$section'\]/{a=1}a==1&&$0~/'$item'/{print $0;exit}' $ini_file`
+        echo ${_readIni#*=}
+}
+#----------------------global param form ceph.ini-------------------------------------------------------------------------
+#get physical node from ceph.ini
+physical_node=$(readConf host physical_node)
+physical_list=($physical_node)
+#get mon node from ceph.ini
+mon_node=$(readConf  mon  mon_node)
+#----------------------global param form ceph.ini-------------------------------------------------------------------------
+
+#--------------------- config ceph.conf,you can add conifg in function mon_install------------------------------------------
+public_network=$(readConf ceph public_network)
+cluster_network=$(readConf ceph cluster_network)
+osd_pool_default_size=$(readConf ceph osd_pool_default_size)
+osd_pool_default_min_size=$(readConf ceph osd_pool_default_min_size)
+#---------------------config ceph.conf,you can add conifg in function mon_install------------------------------------------
+
+function ceph_preinstall(){
+	#foreach every physical_list to install ceph
+	for((i=0;i<${#physical_list[*]};i++))
+	do
+		node=${physical_list[i]} 
+		#ip=$(readConf ${physical_list[i]} public_address)
+
+		echo "1).set enforce 0,shutdown firewalld and iptables"
+		ssh  $node 'set enforce 0'
+		ssh  $node "sed -i 's/SELINUX=enforcing/SELINUX=disabled'/g /etc/selinux/config"
+		ssh  $node 'systemctl stop firewalld'
+		ssh  $node 'systemctl disable firewalld'
+		ssh  $node 'iptables -F'
+		ssh  $node 'systemctl stop iptables && systemctl disable iptables'
+		ssh  $node 'echo > /etc/sysctl.conf'
+		ssh  $node 'echo vm.swappiness = 0 >> /etc/sysctl.conf'
+		ssh  $node 'echo fs.file-max = 26234859 >> /etc/sysctl.conf'
+		ssh  $node 'echo vm.dirty_ratio = 40 >> /etc/sysctl.conf'
+		ssh  $node 'echo kernel.pid_max = 4194303 >> /etc/sysctl.conf'
+		ssh  $node 'echo > /etc/security/limits.conf'
+		ssh  $node "echo '*  soft  nofile  65536' >> /etc/security/limits.conf"
+		ssh  $node "echo '*  hard  nofile  65536' >> /etc/security/limits.conf"
+
+
+		echo "2).clear -rf /etc/yum.repos.d/"
+		ssh  $node 'rm -rf /etc/yum.repos.d/'
+		ssh  $node 'mkdir -p /etc/yum.repos.d/'
+
+		echo "3).wget aliyun repo"
+		ssh  $node 'wget http://mirrors.aliyun.com/repo/Centos-7.repo -O /etc/yum.repos.d/Centos-7.repo'
+		ssh  $node 'wget http://mirrors.aliyun.com/repo/epel-7.repo   -O /etc/yum.repos.d/epel-7.repo'
+
+		echo "4).configure ceph ceph-deploy yum"
+		ssh  $node 'echo "[ceph]" >    /etc/yum.repos.d/ceph.repo'
+		ssh  $node 'echo "name=ceph" >> /etc/yum.repos.d/ceph.repo'
+		ssh  $node 'echo "baseurl=http://mirrors.aliyun.com/ceph/rpm-kraken/el7/x86_64/" >> /etc/yum.repos.d/ceph.repo'
+		ssh  $node 'echo "gpgcheck=0" >> /etc/yum.repos.d/ceph.repo'
+		ssh  $node 'echo "[ceph-noarch]" >> /etc/yum.repos.d/ceph.repo'
+		ssh  $node 'echo "name=cephnoarch" >> /etc/yum.repos.d/ceph.repo'
+		ssh  $node 'echo "baseurl=http://mirrors.aliyun.com/ceph/rpm-kraken/el7/noarch/" >> /etc/yum.repos.d/ceph.repo'
+		ssh  $node 'echo "gpgcheck=0" >> /etc/yum.repos.d/ceph.repo'
+		ssh  $node 'yum clean all'
+		ssh  $node 'yum update -y' 
+		ssh  $node 'yum upgrade -y'
+
+		echo "5).set yum cache 1"
+		ssh $node "sed -i 's/keepcache=0/keepcache=1/g' /etc/yum.conf" 
+
+		echo "6).install ceph packages"
+		ssh  $node 'yum -y install ceph'
+	done
+	echo "7).yum install -y ceph-deploy"
+	yum install -y ceph-deploy
+	mkdir -p /home/ceph/my-cluster/ && cp ceph.ini /home/ceph/my-cluster/ && cd /home/ceph/my-cluster/
+}
+
+function ceph_moninstall(){
+	echo "8).create mon node."
+	echo "install ceph mon on node:${mon_node}"
+	ceph-deploy new ${mon_node}
+
+	echo "9).config ceph.conf file"
+	echo "public_network = ${public_network}"                      >> /home/ceph/my-cluster/ceph.conf
+	[ ! -z ${cluster_network} ] && echo "cluster_network = ${cluster_network}"                      >> /home/ceph/my-cluster/ceph.conf
+
+	cat >> /home/ceph/my-cluster/ceph.conf <<EOF
+max_open_files=65536
+osd_pool_default_size =
+osd_pool_default_min_size =
+osd_pool_default_pg_num = 128
+osd_pool_default_pgp_num = 128
+osd_max_backfills = 1
+osd_backfill_scan_min = 8
+osd_backfill_scan_max = 64
+osd_max_scrubs = 1
+osd_max_scrub_sleep = 1
+osd_max_scrub_chunk_min = 1
+osd_max_scrub_chunk_max = 5
+osd_max_scrub_chunk_stride = 1048576
+osd_max_cache_size = 512
+osd_scrub_begin_hour = 1
+osd_scrub_end_hour = 7
+osd_crush_update_on_start = false
+osd_client_message_cap = 65536
+osd_client_message_size_cap = 2147483648
+osd_op_threads = 32
+osd_disk_threads = 4
+osd_heartbeat_grace = 40
+osd_journal_size = 20480
+osd_deep_scrub_stride = 131072
+osd_client_op_prioriy = 2
+osd_recovery_max_active = 1
+osd_recovery_max_single_start = 1
+osd_recovery_op_priority = 50
+osd_recovery_max_chunk = 1048576
+osd_recovery_threads = 1
+osd_mount_options_xfs = "rw,noexec,nodev,noatime,nodiratime,nobarrier,inode64,logbufs=8,logbsize=256k,delaylog,allocsize=4M"
+osd_mkfs_options_xfs = "-f -i size=2048"
+osd_map_cache_bl_size = 128
+osd_map_cache_size = 1024
+osd_max_write_size = 256
+osd_map_dedup=true
+filestore_xattr_use_omap = true
+filestore_min_sync_interval = 10
+filestore_max_sync_interval = 15
+filestore_queue_max_ops = 65536
+filestore_queue_max_bytes = 10485760
+filestore_queue_committing_max_bytes = 10485760000
+filestore_queue_committing_max_ops = 65536
+filestore_op_threads = 32
+filestore_fd_cache_size = 8192
+filestore_journal_parallel = true
+filestore_wbthrottle_xfs_bytes_start_flusher = 419430400
+filestore_wbthrottle_xfs_bytes_hard_limit =    4194304000
+filestore_wbthrottle_xfs_ios_start_flusher = 5000
+filestore_wbthrottle_xfs_ios_hard_limit = 50000
+filestore_wbthrottle_xfs_inodes_start_flusher = 5000
+filestore_wbthrottle_xfs_inodes_hard_limit = 50000
+filestore_merge_threshold = 40
+filestore_split_multiple = 8
+journal_max_write_bytes = 1073714824
+journal_max_write_entries = 10000
+journal_queue_max_ops = 50000
+journal_queue_max_bytes = 10485760000
+journal_block_align = true
+journal_aio = true
+journal_dio = true
+rbd_cache_max_dirty = 134217728
+rbd_cache_target_dirty = 67108864
+rbd_cache_max_dirty_age = 5
+rbd_cache_size = 268435456
+rbd_cache_writethrough_until_flush = true
+rbd_concurrent_management_ops = 10
+rbd_default_format = 2
+ms_dispatch_throttle_bytes = 536870912
+debug_lockdep =  0/0
+debug_context =  0/0
+debug_crush =  0/0
+debug_buffer =  0/0
+debug_timer =  0/0
+debug_filer =  0/0
+debug_objecter =  0/0
+debug_rados =  0/0
+debug_rbd =  0/0
+debug_journaler =  0/0
+debug_objectcatcher =  0/0
+debug_client = 0/0
+debug_osd = 0/0
+debug_optracker = 0/0
+debug_objclass = 0/0
+debug_filestore = 0/0
+debug_journal = 0/0
+debug_ms =  0/0
+debug_monc =  0/0
+debug_tp =  0/0
+debug_auth =  0/0
+debug_finisher =  0/0
+debug_heartbeatmap =  0/0
+debug_perfcounter =  0/0
+debug_asok =  0/0
+debug_throttle =  0/0
+debug_mon =  0/0
+xos =  0/0
+debug_rgw =  0/0
+mon_osd_down_out_interval =  600
+mon_allow_pool_delete =  true
+mon_osd_min_down_reporters =  3
+EOF
+	echo "10).create mon according to ceph.conf"
+	ceph-deploy --overwrite-conf mon create-initial
+	chmod a+x ceph.client.admin.keyring
+
+	echo "11).push ceph.client.admin.keyring to every node"
+	ceph-deploy admin ${physical_node}
+}
+
+function ceph_add_osd(){
+	for((i=0;i<${#physical_list[*]};i++))
+	do
+		node=${physical_list[i]}
+		echo "11).push ceph.conf to every physical node"
+		ceph-deploy --overwrite-conf config push ${node}
+		ceph osd crush add-bucket ${node} host
+                ceph osd crush move ${node} root=default
+		
+		echo "12).make sure journal partion owner is ceph"
+		ssh  ${node} "echo 'KERNEL==\"sd[b-z]1\", OWNER=\"ceph\", GROUP=\"ceph\", MODE=\"660\"' > /usr/lib/udev/rules.d/99-trunkey.rules"
+		ssh  ${node} "echo 'SUBSYSTEM==\"block\", ATTR{device/model}==\"Crucial_CT1024MX\", ACTION==\"add|change\", KERNEL==\"sd[a-z]\", ATTR{bdi/read_ahead_kb}=\"16384\", ATTR{queue/scheduler}=\"noop\",ATTR{queue/read_ahead_kb}=\"16384\",ATTR{queue/nr_requests}=\"512\"' >> /usr/lib/udev/rules.d/99-trunkey.rules"
+
+		echo "13).starting add osd."
+		disk_list=($(readConf ${node} disk_list))
+		for ((j=0;j<${#disk_list[*]};j++))
+		do
+			disk=${disk_list[j]}
+			echo "13).mkfs.xfs osd of disk_list:$disk"
+			#ceph-deploy disk_list zap ${node}:${disk}
+			ssh $node "parted -s '/dev/${disk}' mklabel gpt"
+			ssh $node "parted -s '/dev/${disk}' mkpart journal 1  5G"
+			ssh $node "parted -s '/dev/${disk}' mkpart data    5G -- -1"
+			ssh $node "mkfs.xfs -f  '/dev/${disk}1'"
+			ssh $node "mkfs.xfs -f  '/dev/${disk}2'"
+
+			echo "14).prepare osd of disk:${disk}"
+			ssh ${node} "/usr/sbin/sgdisk  --typecode=1:45b0969e-9b03-4f30-b4c6-b4b80ceff106 -- /dev/${disk}"
+                        ssh ${node} "/usr/sbin/sgdisk  --typecode=2:4fbd7e29-9d25-41b8-afd0-062c0ceff05d -- /dev/${disk}"
+			ceph-deploy --overwrite-conf osd prepare  ${node}:"/dev/${disk}2":"/dev/${disk}1"
+			ssh ${node} "chown -R ceph:ceph /dev/${disk}1"
+			ceph-deploy --overwrite-conf osd activate ${node}:"/dev/${disk}2":"/dev/${disk}1"
+			ssh ${node} df |grep ${disk}|awk -F- '{printf $2}' > /tmp/id.txt
+			ceph osd crush add osd.`cat /tmp/id.txt` 1.0 host=${node}
+		done
+	done
+}
+
+function ceph_set_erasure_code(){
+	echo "set eraure code profile"
+	ceph osd erasure-code-profile set myprofile k=3 m=1 ruleset-failure-domain=host
+
+	echo "create erasure pool"
+	ceph osd pool create ecpool 128 128 erasure myprofile
+
+	echo "create cache pool"
+	ceph osd pool create cache 1024 1024
+
+	echo "set cache pool as tier pool"
+	ceph osd tier add ecpool cache
+	ceph osd tier cache-mode cache writeback
+	ceph osd tier set-overlay ecpool cache
+
+	echo "config cache pool"
+	ceph osd pool set cache hit_set_type bloom
+	ceph osd pool set cache hit_set_count 1
+	ceph osd pool set cache hit_set_period 3600
+	ceph osd pool set cache target_max_bytes 1000000000000
+	ceph osd pool set cache min_read_recency_for_promote 1
+	ceph osd pool set cache min_write_recency_for_promote 1
+
+	echo "set cache pool flush and evict time period"
+	ceph osd pool set cache cache_target_dirty_ratio 0.4
+	ceph osd pool set cache cache_target_dirty_high_ratio 0.6
+	ceph osd pool set cache cache_target_full_ratio 0.8
+}
+
+function ceph_after_install(){
+	echo "16).delete rbd pool"
+	ceph osd pool rm rbd rbd --yes-i-really-really-mean-it
+	
+
+	echo "19).verify the ceph cluster"
+	ceph -s
+}
+
+function ceph_purgedata(){
+	echo "1).uninstall ceph in all ceph node"
+	ceph-deploy uninstall ${physical_node}
+	ceph-deploy purge ${physical_node}
+	ceph-deploy purgedata ${physical_node}
+
+	echo "2).forget keys"
+	ceph-deploy forgetkeys
+
+	echo "3).yum remove -y ceph-deploy"
+	yum remove -y ceph-deploy
+
+	echo "4).delete workdir of ceph-deploy"
+	rm -rf /home/ceph/my-cluster
+	
+	for((i=0;i<${#physical_list[*]};i++))
+	do
+		node=${physical_list[i]} 
+
+		echo "6).yum remove ceph packages"
+		ssh ${node} "yum remove -y ceph"
+
+		echo "7).delete yum.repos.d"
+		ssh  $node "rm -rf /etc/yum.repos.d/"
+		ssh  $node "mkdir -p /etc/yum.repos.d/"
+
+		echo "8).delete ceph sudo file."
+		ssh ${node} "userdel ceph"
+
+		echo "9).delete ceph disk owner file."
+		ssh ${node} "rm -rf /usr/lib/udev/rules.d/99-trunkey.rules"
+
+		echo "10).set somefile empty."
+		ssh ${node} "echo > /etc/sysctl.conf"
+		ssh ${node} "echo > /etc/security/limits.conf"
+
+		echo "11).remove ceph dir"
+		ssh ${node} "rm -rf /var/lib/ceph"
+		ssh ${node} "rm -rf /var/run/ceph"
+		ssh ${node} "rm -rf /etc/ceph"
+		
+	done
+}
+
+function ceph_install(){
+	echo "starting install ceph in 3 seconds............"
+	sleep 3
+	ceph_preinstall
+	ceph_moninstall
+	ceph_add_osd
+	ceph_after_install
+}
+
+
+function ceph_uninstall(){
+	echo "starting uninstall ceph in 3 seconds............"
+	sleep 3
+	ceph_purgedata
+}
+
+function ceph_add_osds(){
+	node=$1
+	disk=$2
+	[ -z ${node} -o -z ${disk} ] && echo "bad arguments,please check." && return 1
+
+	read -p  "are you sure you want to add ${disk} to ${node}? [Y/N]:"  res
+	[ ${res} != "Y" ] && echo "quit to add." && exit -1
+
+	echo "1).mkfs.xfs osd of disk_list:disk"
+	cd /home/ceph/my-cluster/
+	#ceph-deploy disk_list zap ${node}:${disk}
+	ssh $node "parted -s '/dev/${disk}' mklabel gpt"
+	ssh $node "parted -s '/dev/${disk}' mkpart journal 1  5G"
+	ssh $node "parted -s '/dev/${disk}' mkpart data    5G -- -1"
+	ssh $node "mkfs.xfs -f  '/dev/${disk}1'"
+	ssh $node "mkfs.xfs -f  '/dev/${disk}2'"
+
+	echo "2).prepare osd of disk:${disk}"
+	ssh ${node} "/usr/sbin/sgdisk  --typecode=1:45b0969e-9b03-4f30-b4c6-b4b80ceff106 -- /dev/${disk}"
+	ssh ${node} "/usr/sbin/sgdisk  --typecode=2:4fbd7e29-9d25-41b8-afd0-062c0ceff05d -- /dev/${disk}"
+	ceph-deploy --overwrite-conf osd prepare  ${node}:"/dev/${disk}2":"/dev/${disk}1"
+	ssh ${node} "chown -R ceph:ceph /dev/${disk}1"
+	ceph-deploy --overwrite-conf osd activate ${node}:"/dev/${disk}2":"/dev/${disk}1"
+	ssh ${node} df |grep ${disk}|awk -F- '{printf $2}' > /tmp/id.txt
+	ceph osd crush add osd.`cat /tmp/id.txt` 1.0 host=${node}
+}
+
+function ceph_add_host(){
+	node=$1
+	[ -z ${node} ] && echo "bad arguments,please check." && return 1
+
+	read -p  "are you sure you want to add all disk of  ${node}? [Y/N]:"  res
+	[ ${res} != "Y" ] && echo "quit to add host." && exit -1
+
+	echo "1).set enforce 0,shutdown firewalld and iptables"
+	ssh  $node 'set enforce 0'
+	ssh  $node "sed -i 's/SELINUX=enforcing/SELINUX=disabled'/g /etc/selinux/config"
+	ssh  $node 'systemctl stop firewalld'
+	ssh  $node 'systemctl disable firewalld'
+	ssh  $node 'iptables -F'
+	ssh  $node 'systemctl stop iptables && systemctl disable iptables'
+	ssh  $node 'echo > /etc/sysctl.conf'
+	ssh  $node 'echo vm.swappiness = 0 >> /etc/sysctl.conf'
+	ssh  $node 'echo fs.file-max = 26234859 >> /etc/sysctl.conf'
+	ssh  $node 'echo vm.dirty_ratio = 40 >> /etc/sysctl.conf'
+	ssh  $node 'echo kernel.pid_max = 4194303 >> /etc/sysctl.conf'
+	ssh  $node 'echo > /etc/security/limits.conf'
+	ssh  $node "echo '*  soft  nofile  65536' >> /etc/security/limits.conf"
+	ssh  $node "echo '*  hard  nofile  65536' >> /etc/security/limits.conf"
+
+
+	echo "2).clear -rf /etc/yum.repos.d/"
+	ssh  $node 'rm -rf /etc/yum.repos.d/'
+	ssh  $node 'mkdir -p /etc/yum.repos.d/'
+
+	echo "3).wget aliyun repo"
+	ssh  $node 'wget http://mirrors.aliyun.com/repo/Centos-7.repo -O /etc/yum.repos.d/Centos-7.repo'
+	ssh  $node 'wget http://mirrors.aliyun.com/repo/epel-7.repo   -O /etc/yum.repos.d/epel-7.repo'
+
+	echo "4).configure ceph ceph-deploy yum"
+	ssh  $node 'echo "[ceph]" >    /etc/yum.repos.d/ceph.repo'
+	ssh  $node 'echo "name=ceph" >> /etc/yum.repos.d/ceph.repo'
+	ssh  $node 'echo "baseurl=http://mirrors.aliyun.com/ceph/rpm-kraken/el7/x86_64/" >> /etc/yum.repos.d/ceph.repo'
+	ssh  $node 'echo "gpgcheck=0" >> /etc/yum.repos.d/ceph.repo'
+	ssh  $node 'echo "[ceph-noarch]" >> /etc/yum.repos.d/ceph.repo'
+	ssh  $node 'echo "name=cephnoarch" >> /etc/yum.repos.d/ceph.repo'
+	ssh  $node 'echo "baseurl=http://mirrors.aliyun.com/ceph/rpm-kraken/el7/noarch/" >> /etc/yum.repos.d/ceph.repo'
+	ssh  $node 'echo "gpgcheck=0" >> /etc/yum.repos.d/ceph.repo'
+	ssh  $node 'yum clean all'
+	ssh  $node 'yum update -y' 
+	ssh  $node 'yum upgrade -y'
+
+
+	echo "5).set yum cache 1"
+	ssh $node "sed -i 's/keepcache=0/keepcache=1/g' /etc/yum.conf" 
+
+	echo "6).install ceph packages"
+	ssh  $node 'yum -y install ceph'
+
+	echo "7).push ceph.conf to every physical node"
+	cd /home/ceph/my-cluster
+	ceph-deploy --overwrite-conf config push ${node}
+	ceph osd crush add-bucket ${node} host
+	ceph osd crush move ${node} root=default
+	
+	echo "8).make sure journal partion owner is ceph"
+	ssh  ${node} "echo 'KERNEL==\"sd[b-z]1\", OWNER=\"ceph\", GROUP=\"ceph\", MODE=\"660\"' > /usr/lib/udev/rules.d/99-trunkey.rules"
+	ssh  ${node} "echo 'SUBSYSTEM==\"block\", ATTR{device/model}==\"Crucial_CT1024MX\", ACTION==\"add|change\", KERNEL==\"sd[a-z]\", ATTR{bdi/read_ahead_kb}=\"16384\", ATTR{queue/scheduler}=\"noop\",ATTR{queue/read_ahead_kb}=\"16384\",ATTR{queue/nr_requests}=\"512\"' >> /usr/lib/udev/rules.d/99-trunkey.rules"
+
+	echo "9).starting add osd."
+	disk_list=($(readConf ${node} disk_list))
+	for ((j=0;j<${#disk_list[*]};j++))
+	do
+		echo "1).mkfs.xfs osd of disk_list:disk"
+		disk=${disk_list[j]}
+		#ceph-deploy disk_list zap ${node}:${disk}
+		ssh $node "parted -s '/dev/${disk}' mklabel gpt"
+		ssh $node "parted -s '/dev/${disk}' mkpart journal 1  5G"
+		ssh $node "parted -s '/dev/${disk}' mkpart data    5G -- -1"
+		ssh $node "mkfs.xfs -f  '/dev/${disk}1'"
+		ssh $node "mkfs.xfs -f  '/dev/${disk}2'"
+
+		echo "2).prepare osd of disk:${disk}"
+		ssh ${node} "/usr/sbin/sgdisk  --typecode=1:45b0969e-9b03-4f30-b4c6-b4b80ceff106 -- /dev/${disk}"
+		ssh ${node} "/usr/sbin/sgdisk  --typecode=2:4fbd7e29-9d25-41b8-afd0-062c0ceff05d -- /dev/${disk}"
+		ceph-deploy --overwrite-conf osd prepare  ${node}:"/dev/${disk}2":"/dev/${disk}1"
+		ssh ${node} "chown -R ceph:ceph /dev/${disk}1"
+		ceph-deploy --overwrite-conf osd activate ${node}:"/dev/${disk}2":"/dev/${disk}1"
+		ssh ${node} df |grep ${disk}|awk -F- '{printf $2}' > /tmp/id.txt
+		ceph osd crush add osd.`cat /tmp/id.txt` 1.0 host=${node}
+	done
+}
+
+function ceph_remove_host(){
+	node=$1
+	[ -z ${node} ] && echo "bad arguments,please check." && return 1
+
+	read -p  "are you sure you want to remove all disk of  ${node}? [Y/N]:"  res
+	[ ${res} != "Y" ] && echo "quit to remove host." && exit -1
+
+	osds=`ssh ${node} "ls  /var/lib/ceph/osd/"|awk -F- '{print $2}'`	
+	for id in ${osds};do
+		ssh ${node} "systemctl stop ceph-osd@${id}"
+		ssh ${node} "systemctl disable ceph-osd@${id}"
+		ceph osd down ${id}
+		ceph osd out ${id}
+		ceph osd crush remove osd.${id}
+		ceph auth del osd.${id}
+		ceph osd rm ${id}
+		ssh ${node} "umount /var/lib/ceph/osd/ceph-${id}"
+		ssh ${node} "rm -rf /var/lib/ceph/osd/ceph-${id}"
+		ssh ${node} "rm -rf /etc/systemd/system/ceph-osd.target.wants/ceph-osd@${id}.service"
+	done
+	ceph osd crush remove ${node}
+	echo "11).remove ceph dir"
+	cd /home/ceph/my-cluster
+	ceph-deploy uninstall ${node}
+	ceph-deploy purge ${node}
+	ceph-deploy purgedata ${node}
+	ssh ${node} "userdel -r ceph"
+	ssh ${node} "rm -rf /var/run/ceph"
+	ssh ${node} "rm -rf /etc/ceph"
+
+}
+
+function ceph_remove_osds(){
+	node=$1
+	id=$2
+	[ -z ${node} -o -z ${id} ] && echo "bad arguments,please check." && return 1
+
+	read -p  "are you sure you want to remove osd.${id} from ${node}? [Y/N]:"  res
+	[ ${res} != "Y" ] && echo "quit to add." && exit -1
+
+	ssh ${node} "systemctl stop ceph-osd@${id}"
+	ssh ${node} "systemctl disable ceph-osd@${id}"
+	ceph osd down ${id}
+	ceph osd out ${id}
+	ceph osd crush remove osd.${id}
+	ceph auth del osd.${id}
+	ceph osd rm ${id}
+	ssh ${node} "umount /var/lib/ceph/osd/ceph-${id}"
+	ssh ${node} "rm -rf /var/lib/ceph/osd/ceph-${id}"
+	ssh ${node} "rm -rf /etc/systemd/system/ceph-osd.target.wants/ceph-osd@${id}.service"
+}
+
+function ceph_echo_help(){
+	echo "example: "
+	echo "1)./cephd install  -------------to install 2 replica ceph cluster"
+	echo "2)./cephd erasure_code  --------to set erasure code 3+1 to ceph cluster"
+	echo "3)./cephd uninstall     --------to uninstall ceph"
+	echo "4)./cephd add_host NodeA     --------to add all disk of host NodeA to ceph cluster"
+	echo "5)./cephd remove_host NodeA     --------to remove all disk of host NodeA from ceph cluster"
+	echo "6)./cephd add_osd NodeA sdb --------to add disk sdb of host NodeA to ceph cluster"
+	echo "7)./cephd remove_osd NodeA 0 -------to remove osd num 0 from ceph cluster"
+		
+
+}
+
+function install(){
+	ceph_install
+}
+
+function uninstall(){
+	ceph_uninstall
+}
+
+if [ $# -eq 0 ]; then
+    echo "usage: $0 [install|uninstall|add_osd|remove_osd|add_host|remove_host]" >> a.txt
+    exit 1
+fi
+
+if [ "$*" = "install" ]; then
+    install
+elif [ "$*" = "uninstall" ]; then
+    uninstall
+elif [ "$*" = "erasure_code" ]; then
+    ceph_set_erasure_code
+elif [ "$1" = "add_host" ]; then
+    ceph_add_host $2 
+elif [ "$1" = "remove_host" ]; then
+    ceph_remove_host $2 
+elif [ "$1" = "add_osd" ]; then
+    ceph_add_osds $2 $3
+elif [ "$1" = "remove_osd" ]; then
+    ceph_remove_osds $2 $3
+elif [ "$1" = "--help" ]; then
+    ceph_echo_help
+else
+    echo "Not support service: $@. Please use [install|uninstall]|add_osd |remove_osd|add_host|remove_host"
+    exit 1
+fi
