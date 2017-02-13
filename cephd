@@ -324,6 +324,7 @@ function ceph_set_erasure_code(){
 
 	echo "create erasure pool"
 	ceph osd pool create ecpool 128 128 erasure myprofile
+	ceph osd pool  set ecpool  min_size 3
 
 	echo "create cache pool"
 	ceph osd pool create cache 1024 1024
