@@ -130,6 +130,7 @@ function ceph_preinstall(){
 		ssh  $node 'mkdir -p /etc/yum.repos.d/'
 
 		echo "3).wget aliyun repo"
+		ssh  $node 'yum install -y wget'
 		ssh  $node 'wget http://mirrors.aliyun.com/repo/Centos-7.repo -O /etc/yum.repos.d/Centos-7.repo'
 		ssh  $node 'wget http://mirrors.aliyun.com/repo/epel-7.repo   -O /etc/yum.repos.d/epel-7.repo'
 
