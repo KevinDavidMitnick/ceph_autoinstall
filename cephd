@@ -126,11 +126,10 @@ function ceph_preinstall(){
 
 
 		echo "2).clear -rf /etc/yum.repos.d/"
-		ssh  $node 'rm -rf /etc/yum.repos.d/'
-		ssh  $node 'mkdir -p /etc/yum.repos.d/'
+		ssh  $node 'yum install -y wget'
+		ssh  $node 'rm -rf /etc/yum.repos.d/*'
 
 		echo "3).wget aliyun repo"
-		ssh  $node 'yum install -y wget'
 		ssh  $node 'wget http://mirrors.aliyun.com/repo/Centos-7.repo -O /etc/yum.repos.d/Centos-7.repo'
 		ssh  $node 'wget http://mirrors.aliyun.com/repo/epel-7.repo   -O /etc/yum.repos.d/epel-7.repo'
 
@@ -172,8 +171,8 @@ function ceph_moninstall(){
 
 	cat >> /home/ceph/my-cluster/ceph.conf <<EOF
 max_open_files=65536
-osd_pool_default_size =
-osd_pool_default_min_size =
+osd_pool_default_size = 2
+osd_pool_default_min_size = 1
 osd_pool_default_pg_num = 128
 osd_pool_default_pgp_num = 128
 osd_max_backfills = 1
@@ -325,7 +324,7 @@ function ceph_set_erasure_code(){
 
 	echo "create erasure pool"
 	ceph osd pool create ecpool 128 128 erasure myprofile
-	ceph osd pool  set ecpool  min_size 3
+	ceph osd pool  set ecpool  m 3
 
 	echo "create cache pool"
 	ceph osd pool create cache 1024 1024
