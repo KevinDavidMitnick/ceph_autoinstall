@@ -37,17 +37,6 @@ osd_pool_default_size=$(readConf ceph osd_pool_default_size)
 osd_pool_default_min_size=$(readConf ceph osd_pool_default_min_size)
 #---------------------config ceph.conf,you can add conifg in function mon_install------------------------------------------
 
-function ssh_init(){
-	ssh-keygen
-	for((i=0;i<${#physical_list[*]};i++))
-	do
-		node=${physical_list[i]} 
-		ssh-copy-id ${node}
-	done
-
-}
-
-
 function ntp_init(){
 	#1.write remote ntpd.conf
 	cluster_net=`echo -n ${cluster_network}|sed 's/0/*/g'`
@@ -102,8 +91,6 @@ function ntp_init(){
 
 function ceph_preinstall(){
 	#echo 0).ssh init for all nodes
-	ssh_init
-
 	#foreach every physical_list to install ceph
 	for((i=0;i<${#physical_list[*]};i++))
 	do
@@ -171,8 +158,8 @@ function ceph_moninstall(){
 
 	cat >> /home/ceph/my-cluster/ceph.conf <<EOF
 max_open_files=65536
-osd_pool_default_size = 2
-osd_pool_default_min_size = 1
+osd_pool_default_size = ${osd_pool_default_size}
+osd_pool_default_min_size = ${osd_pool_default_min_size}
 osd_pool_default_pg_num = 128
 osd_pool_default_pgp_num = 128
 osd_max_backfills = 1
@@ -610,8 +597,35 @@ function uninstall(){
 	ceph_uninstall
 }
 
+function install_radosgw(){
+	cd /home/ceph/my-cluster
+	host_name=`hostname`
+	host_short=`hostname -s`
+	yum install -y ceph-radosgw python-boto
+	ceph-deploy admin ${host_name}
+	ceph-deploy rgw create ${host_short}
+	systemctl start ceph-radosgw@rgw.${host_short}
+	systemctl enable ceph-radosgw@rgw.${host_short}
+
+	cat >> ceph.conf <<EOF
+[client.rgw.${host_short}]
+rgw_frontends = "civetweb port=80"
+rgw dns name = ${host_name}
+EOF
+
+	for((i=0;i<${#physical_list[*]};i++))
+	do
+		node=${physical_list[i]}
+		echo "push ceph.conf to every physical node"
+		ceph-deploy --overwrite-conf config push ${node}
+	done
+
+	systemctl restart ceph-radosgw@rgw.${host_short}
+	radosgw-admin user create --uid="deploy" --display-name="deploy" --access-key=FA2YUVEBYR0L7LWG5HOS  --secret-key=mkAZYAwmSzAjvtzHBUsi0liVXkbsTExFj2ToUNFi
+}
+
 if [ $# -eq 0 ]; then
-    echo "usage: $0 [install|uninstall|add_osd|remove_osd|add_host|remove_host]" >> a.txt
+    echo "usage: $0 [install|uninstall|install_radosgw|add_osd|remove_osd|add_host|remove_host]" >> a.txt
     exit 1
 fi
 
@@ -619,6 +633,8 @@ if [ "$*" = "install" ]; then
     install
 elif [ "$*" = "uninstall" ]; then
     uninstall
+elif [ "$*" = "install_radosgw" ]; then
+    install_radosgw
 elif [ "$*" = "erasure_code" ]; then
     ceph_set_erasure_code
 elif [ "$1" = "add_host" ]; then
